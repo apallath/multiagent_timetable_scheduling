@@ -16,6 +16,10 @@ globals [
   num_courses
   num_students
   num_professors
+
+  total_dept_clashes
+
+  temperature ;;for metropolis acceptance criterion
 ]
 
 persons-own [
@@ -25,8 +29,8 @@ persons-own [
   own_dept_courses
   other_dept_courses
 
-  timetable
-  slot_hits
+  timetable ;;course -> which time slot it falls in
+  slot_hits ;;slot -> number of courses in that slot
 
   clashes
 ]
@@ -104,7 +108,7 @@ to setup
       set own_dept_courses item 1 x
       set other_dept_courses item 2 x
       ;;data structure for slot hits (in order to calculate clashes)
-      set slot_hits n-values num_courses [0]
+      set slot_hits n-values total_time_slots [0]
       ;;data structure for timetable
       set timetable table:make
       set clashes 0
@@ -123,7 +127,7 @@ to setup
       set own_dept_courses item 1 x
       set other_dept_courses item 2 x
       ;;data structure for slot hits (in order to calculate clashes)
-      set slot_hits n-values num_courses [0]
+      set slot_hits n-values total_time_slots [0]
       ;;data structure for timetable
       set timetable table:make
       set clashes 0
@@ -172,9 +176,6 @@ to setup
     die
   ]
 
-  show max [weight] of course_course_links
-  show max [priority] of persons
-
   ;;recolor links based on weight
   ask course_course_links [
     set color ( weight / (max [weight] of course_course_links) * 139 )
@@ -191,6 +192,9 @@ to setup
   ;;setup initial timetable
 
   ;;generate random initial timetable, not respecting clashes, using Largest Degree heuristic
+
+  let total_taken 0
+
   ask DAs [
     let did department_id
     let tt timetable
@@ -199,43 +203,167 @@ to setup
     ;;in decreasing order of degree
     foreach sort-by > sort-on [degree] courses with [department_id = did] [
       thecourse -> ask thecourse [
-        let done False
-        while [not done] [
-          let rval one-of range (length sh)
-          if item rval sh = 0 [
-            set sh replace-item rval sh 1
-            table:put tt rval course_id
-            set done True
-          ]
-        ]
+        ;;update slot hits
+        let rval one-of range (length sh)
+        set sh replace-item rval sh ( (item rval sh) + 1 )
+
+        ;;update timetable
+        table:put tt course_id rval ;;update timeslot the course has been assigned
       ]
     ]
+
     set slot_hits sh
-    show slot_hits
-    show timetable
+    set timetable tt
+
+    ;;initialize personal timetables
+    init_personal_timetables department_id timetable slot_hits
   ]
+
+  update_total_dept_clashes
+
+  set temperature start_temperature
+
+  setup-plots
+  update-plots
 end
 
 
 to go
   ;;simulated annealing approach to obtain timetable minimizing clashes
+  ;;i.e: search the solution space using the Metropolis Monte Carlo algorithm, adjust temperature parameter as per the cooling schedule
+
   ask DAs [
+    let old_clashes clashes
+
+    show slot_hits
+    show timetable
+
+    ifelse random-float 1 < 0.5 [
+      ;;move 1: move a random course to a new time slot
+      let did department_id
+      let course_moved one-of courses with [ department_id = did ]
+      let old_slot table:get timetable ([course_id] of course_moved)
+      let new_slot one-of range total_time_slots
+      let sh slot_hits
+      let tt timetable
+
+      ask course_moved [
+        set sh replace-item old_slot sh ( (item old_slot sh) - 1 ) ;;course has moved
+        set sh replace-item new_slot sh ( (item new_slot sh) + 1 ) ;;course has moved
+
+        ;;update timetable
+        table:put tt course_id new_slot ;;update timeslot the course has been assigned
+      ]
+
+      set timetable tt
+      set slot_hits sh
+
+      show timetable
+      show slot_hits
+
+      ;;It is not efficient to re-construct each person's personal timetable information for just one update.
+      ;;However, due to the small size of the test instances, we can get away with this - for now...
+      ;;TODO: add a more efficient update function
+      init_personal_timetables department_id timetable slot_hits
+      update_total_dept_clashes
+
+
+      ;;if the Metropolis criterion isn't satisfied
+      if (clashes > old_clashes and random-float 1 > ( exp ( old_clashes - clashes ) / temperature ) ) [
+        show "Move rejected"
+        ;;undo the move
+        ask course_moved [
+          ;;update slot hits
+          set sh replace-item old_slot sh ( (item old_slot sh) + 1 ) ;;course has moved back
+          set sh replace-item new_slot sh ( (item new_slot sh) - 1 ) ;;course has moved back
+
+         ;;update timetable
+          table:put tt course_id old_slot ;;update timeslot the course has been assigned
+        ]
+
+        set timetable tt
+        set slot_hits sh
+
+        init_personal_timetables department_id timetable slot_hits
+        update_total_dept_clashes
+      ]
+    ] [
+      ;;move 2: swap two random courses' time slots
+
+      ;;if the Metropolis criterion isn't satisfied
+      if (clashes > old_clashes and random-float 1 > (0.5) ) [
+        ;;undo the swap
+        show "Swap rejected"
+      ]
+
+    ]
 
   ]
-  ;;output final departmental timetables
-  ask DAs[
 
+  if temperature > 0 [
+    set temperature max list (temperature - cooling_rate) 0
   ]
 
-  ;;TODO: INTER-DEPARTMENT
+  tick;
 end
 
 to showtimetable
-
+  ask DAs [
+    show word "For department " department_id
+    show timetable
+  ]
 end
 
-to getclashes
+to init_personal_timetables [id tt sh]
+  ask DAs with [ department_id = id ] [
+    ask persons with [ department_id = id ] [
 
+      let mytimetable timetable
+      let myslot_hits n-values total_time_slots [0]
+
+      foreach ([course_id] of courses with [department_id = id ] ) [
+        cur_course ->
+
+        if member? cur_course own_dept_courses [
+          ;;update individual timetable
+          let timeslot table:get tt cur_course
+          table:put mytimetable cur_course timeslot
+
+          ;;update slot hits
+          set myslot_hits replace-item timeslot myslot_hits ( (item timeslot myslot_hits) + 1 )
+        ]
+      ]
+
+      set timetable mytimetable
+      set slot_hits myslot_hits
+    ]
+  ]
+end
+
+to update_total_dept_clashes
+  let tot 0
+  ask DAs [
+    set clashes getclashes department_id timetable slot_hits
+    show clashes
+    set tot tot + clashes
+  ]
+  set total_dept_clashes tot
+end
+
+to-report getclashes [id tt sh]
+  let calc_clashes 0
+
+  ask DAs with [ department_id = id ] [
+    ask persons with [ department_id = id ] [
+      foreach range total_time_slots [
+        slot ->
+        if item slot slot_hits > 1 [
+          set calc_clashes calc_clashes + priority ;;priority of self
+        ]
+      ]
+    ]
+  ]
+  report calc_clashes
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -283,30 +411,30 @@ NIL
 1
 
 SLIDER
-20
-17
-240
-50
-priority_ratio
-priority_ratio
+22
+99
+242
+132
+cooling_rate
+cooling_rate
 0
 1
-0.75
+0.92
 0.01
 1
 NIL
 HORIZONTAL
 
 SLIDER
-20
-65
-239
-98
+22
+18
+241
+51
 prof_threshold_priority
 prof_threshold_priority
 0
 100
-79.0
+77.0
 1
 1
 NIL
@@ -321,7 +449,7 @@ total_time_slots
 total_time_slots
 0
 336
-16.0
+3.0
 1
 1
 NIL
@@ -338,11 +466,11 @@ TEXTBOX
 1
 
 TEXTBOX
-21
-105
-242
-179
-priority of prof = max(prof_threshold_priority, priority_ratio * class strength)
+22
+135
+244
+155
+Parameters for Simulated Annealing
 12
 0.0
 1
@@ -419,10 +547,10 @@ TEXTBOX
 1
 
 PLOT
-920
-295
-1250
-509
+1108
+20
+1438
+234
 Clashes
 NIL
 NIL
@@ -434,7 +562,7 @@ true
 false
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot count turtles"
+"default" 1.0 0 -16777216 true "" "plot total_dept_clashes"
 
 BUTTON
 20
@@ -453,6 +581,39 @@ NIL
 NIL
 1
 
+SLIDER
+22
+59
+242
+93
+start_temperature
+start_temperature
+0
+1000
+270.0
+0.5
+1
+NIL
+HORIZONTAL
+
+PLOT
+1107
+238
+1439
+453
+Temperature (Annealing)
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -2674135 true "" "plot temperature"
+
 @#$#@#$#@
 ## WHAT IS IT?
 
@@ -468,8 +629,7 @@ In this model, I make the following assumptions:
 
 - A course is decomposed into 'events' - each lecture or tutorial is an event.
 - Each day is decomposed into a certain number of time slots.
-- Each event is thought of as a meeting involving a professor and students. Hence, professors and students are treated as the same type of agent. However, they are given different priorities. The priority of a professor is set as:
-P = max(prof_threshold_priority, priority_ratio * class strength + 1)
+- Each event is thought of as a meeting involving a professor and students. Hence, professors and students are treated as the same type of agent. However, they are given different priorities. The priority of a student is 1, and the priority of a professor can be preset.
 - Each course belongs to a department. Some courses (electives) are shared between departments.
 
 STAGE 1:
@@ -478,7 +638,7 @@ At first, each department prepares its own timetable, ignoring the shared course
 STAGE 2:
 Next, the departments communicate with a Univeral Timetable Agent, to try and produce an optimal timetable.
 
-This netlogo code implements Stage 1. Stage 2 is future work.
+This NetLogo code implements Stage 1. Stage 2 is future work.
 
 Approach for Stage 1:
 
@@ -493,9 +653,9 @@ Approach for Stage 2:
 
 Play around with:
 
-- The ratio of priority of professor to class strength
-- Simulated annealing cooling schedule
-- Number of iterations for optimization
+- The priority of professor
+- Simulated annealing start temperature
+- Simulated annealing cooling rate (decrease in temperature per tick)
 
 ## EXTENDING THE MODEL
 

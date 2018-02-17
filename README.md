@@ -10,6 +10,10 @@ In this model, I make the following assumptions:
 
 I've used the largest degree heuristic and simulated annealing to solve part of the problem. Currently, this handles intra-department scheduling. I still have to implement the function where individual department schedules are patched together to create a global schedule, while minimizing the number of clashes.
 
+# Screenshot
+
+![alt text](screenshot.png "Screenshot of the model in action")
+
 # Structure of input files:
 
 ## courses.txt
