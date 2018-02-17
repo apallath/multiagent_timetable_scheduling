@@ -235,9 +235,6 @@ to go
   ask DAs [
     let old_clashes clashes
 
-    show slot_hits
-    show timetable
-
     ifelse random-float 1 < 0.5 [
       ;;move 1: move a random course to a new time slot
       let did department_id
@@ -257,9 +254,6 @@ to go
 
       set timetable tt
       set slot_hits sh
-
-      show timetable
-      show slot_hits
 
       ;;It is not efficient to re-construct each person's personal timetable information for just one update.
       ;;However, due to the small size of the test instances, we can get away with this - for now...
@@ -287,21 +281,69 @@ to go
         init_personal_timetables department_id timetable slot_hits
         update_total_dept_clashes
       ]
+
     ] [
       ;;move 2: swap two random courses' time slots
+      let did department_id
+      if ( count courses with [ department_id = did ] ) >= 2 [
+        let courses_swapped [course_id] of ( n-of 2 courses with [ department_id = did ] )
+        let c1 item 0 courses_swapped
+        let c2 item 1 courses_swapped
+        let c1slot table:get timetable c1
+        let c2slot table:get timetable c2
+        let sh slot_hits
+        let tt timetable
 
-      ;;if the Metropolis criterion isn't satisfied
-      if (clashes > old_clashes and random-float 1 > (0.5) ) [
-        ;;undo the swap
-        show "Swap rejected"
+        ;;make swap
+        ask courses with [course_id = c1] [
+          ;;update timetable
+          table:put tt course_id c2slot ;;update timeslot
+        ]
+
+        ask courses with [course_id = c2] [
+          ;;update timetable
+          table:put tt course_id c1slot ;;update timeslot
+        ]
+
+        set timetable tt
+        set slot_hits sh
+
+        ;;It is not efficient to re-construct each person's personal timetable information for just one update.
+        ;;However, due to the small size of the test instances, we can get away with this - for now...
+        ;;TODO: add a more efficient update function
+        init_personal_timetables department_id timetable slot_hits
+        update_total_dept_clashes
+
+
+        ;;if the Metropolis criterion isn't satisfied
+        if (clashes > old_clashes and random-float 1 > ( exp ( old_clashes - clashes ) / temperature ) ) [
+          show "Swap rejected"
+          ;;undo swap
+          ask courses with [course_id = c1] [
+            ;;update timetable
+            table:put tt course_id c1slot ;;update timeslot
+          ]
+
+          ask courses with [course_id = c2] [
+            ;;update timetable
+            table:put tt course_id c2slot ;;update timeslot
+          ]
+
+          set timetable tt
+          set slot_hits sh
+
+          init_personal_timetables department_id timetable slot_hits
+          update_total_dept_clashes
+        ]
+
       ]
 
     ]
 
   ]
 
-  if temperature > 0 [
-    set temperature max list (temperature - cooling_rate) 0
+  if temperature > 0.00001 [
+    set temperature max list (temperature - cooling_rate) 0.00001
   ]
 
   tick;
@@ -311,6 +353,7 @@ to showtimetable
   ask DAs [
     show word "For department " department_id
     show timetable
+    show word "Clashes: " clashes
   ]
 end
 
@@ -344,7 +387,6 @@ to update_total_dept_clashes
   let tot 0
   ask DAs [
     set clashes getclashes department_id timetable slot_hits
-    show clashes
     set tot tot + clashes
   ]
   set total_dept_clashes tot
