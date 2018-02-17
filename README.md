@@ -1,6 +1,6 @@
 # Multiagent system for solving a simplified version of University Timetable Scheduling
 
-This is an implementation of a multiagent system for timetable scheduling, in [NetLogo](https://ccl.northwestern.edu/netlogo/) (. Different breeds of agents play the role of different stake-holders in the problem, and simulate the negotiation that normally occurs in offline course-scheduling to arrive at an optimal schedule.
+This is an implementation of a multiagent system for timetable scheduling, in [NetLogo](https://ccl.northwestern.edu/netlogo/). Different breeds of agents play the role of different stake-holders in the problem, and simulate the negotiation that normally occurs in offline course-scheduling to arrive at an optimal schedule.
 
 In this model, I make the following assumptions:
 
@@ -12,18 +12,22 @@ I've used the largest degree heuristic and simulated annealing to solve part of 
 
 # Structure of input files:
 
-courses.txt
+## courses.txt
 
 num_departments
+
 num_courses
+
 \[course\_id department\_id]
 
-professors_and_courses.txt
+## professors_and_courses.txt
 
 num_professors
+
 \[department\_id list\_courses]
 
-students_and_courses.txt
+## students_and_courses.txt
 
 num_students
+
 \[department\_id list\_own\_dept\_courses list\_other\_dept\_courses]
